@@ -2,7 +2,7 @@ from scanner import InicializarScanner, DemeToken, TomeToken, FinalizarScanner, 
 
 def main():
     # Nombre del archivo para probar el scanner
-    nombre_archivo = "prueba_lexica.ne"
+    nombre_archivo = "prueba.ne"
 
     print(f"Analizando archivo: {nombre_archivo}")
     print("-" * 50)
