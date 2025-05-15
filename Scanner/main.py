@@ -1,25 +1,30 @@
-# ETAPA 1 BIBLIOTECA DE ANÁLISIS LÉXICO
-# Emmanuel José Matamoros Jiménez - 2021040420
-# Luis Diego Delgado Muñoz - 2020030408
-
-from lexico import InicializarScanner, DemeElSiguienteCaracter, FinalizarScanner
+from scanner import InicializarScanner, DemeToken, TomeToken, FinalizarScanner, TokenType
 
 def main():
-    # Nombre del archivo para probar la lectura de caracteres
-    nombre_archivo = "prueba.txt"
+    # Nombre del archivo para probar el scanner
+    nombre_archivo = "prueba_lexica.ne"
+
+    print(f"Analizando archivo: {nombre_archivo}")
+    print("-" * 50)
 
     # Inicializar el scanner con el archivo de prueba
     InicializarScanner(nombre_archivo)
 
-    # Llamar repetidamente a DemeElSiguienteCaracter() hasta llegar al fin de archivo
-    while True:
-        caracter = DemeElSiguienteCaracter()
-        if caracter == 'EOF':
-            break
-        print(caracter, end='')  # Imprimir el carácter sin salto de línea
-
-    # Liberar los recursos utilizados por el scanner
-    FinalizarScanner()
+    # Procesar tokens hasta encontrar EOF
+    try:
+        while True:
+            token = DemeToken()
+            print(token)
+            
+            if token.type == TokenType.EOF:
+                break
+            
+            TomeToken()
+    except Exception as e:
+        print(f"Error durante el análisis léxico: {e}")
+    finally:
+        # Liberar los recursos utilizados por el scanner
+        FinalizarScanner()
 
 if __name__ == "__main__":
     main()
