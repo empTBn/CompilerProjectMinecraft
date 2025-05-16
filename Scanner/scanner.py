@@ -40,6 +40,8 @@ class TokenType(Enum):
     GE = auto()           # >=
     IS = auto()           # is
     ISNOT = auto()        # isNot
+    EQ = auto()           # ==
+    NE = auto()           # !=
     # Símbolos
     LPAREN = auto()       # (
     RPAREN = auto()       # )
@@ -134,9 +136,9 @@ def InicializarScanner(nombre_archivo):
         _columna_actual = 1
         _token_actual = None
         if _buffer == '':
-            raise IOError("No se pudo cargar el primer buffer")
+            raise IOError("Buffer inicial vacío")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"InicializarScanner Error: {e}")
         exit(1)
 
 def FinalizarScanner():
@@ -145,22 +147,25 @@ def FinalizarScanner():
     if _archivo:
         _archivo.close()
         _archivo = None
+    
+def demecaracter():
+    """Envoltura para DemeElSiguienteCaracter (lee sin registros de estado externos)."""
+    return DemeElSiguienteCaracter()
+
+def tomecaracter():
+    """Envoltura para consumo de carácter con buffer."""
+    if _peek_buffer:
+        return _peek_buffer.pop(0)
+    else:
+        return DemeElSiguienteCaracter()
 
 def _peek():
     """Mira el siguiente carácter sin consumirlo."""
     if _peek_buffer:
         return _peek_buffer[0]
-    
-    c = DemeElSiguienteCaracter()
+    c = demecaracter()
     _peek_buffer.append(c)
     return c
-
-def _consume():
-    """Consume un carácter (lo saca del buffer si existe)."""
-    if _peek_buffer:
-        return _peek_buffer.pop(0)
-    else:
-        return DemeElSiguienteCaracter()
 
 def DemeElSiguienteCaracter():
     """Devuelve el siguiente carácter del archivo, usando un buffer."""
@@ -190,7 +195,7 @@ def _es_espaciador(c):
 
 def _es_letra(c):
     """Verifica si un carácter es una letra."""
-    return 'a' <= c <= 'z' or 'A' <= c <= 'Z' or c == '_'
+    return c.isalpha() or c == '_'
 
 def _es_digito(c):
     """Verifica si un carácter es un dígito."""
@@ -204,7 +209,7 @@ def _procesar_identificador_o_palabra_clave():
     while True:
         c = _peek()
         if _es_letra(c) or _es_digito(c):
-            lexema += _consume()
+            lexema += tomecaracter()
         else:
             break
     
@@ -216,81 +221,63 @@ def _procesar_identificador_o_palabra_clave():
     return Token(tipo, lexema, line=_linea_actual, col_start=col_inicio, col_end=col_fin)
 
 def _procesar_numero():
-    """Procesa un literal numérico (entero o flotante)."""
+    """Procesa números enteros, flotantes y notación científica."""
     col_inicio = _columna_actual
     lexema = ""
-    
-    # Verificar si es hexadecimal
-    if _peek() == '0' and (_peek_buffer[1] if len(_peek_buffer) > 1 else DemeElSiguienteCaracter()) in 'xX':
-        lexema += _consume()  # Consumir '0'
-        lexema += _consume()  # Consumir 'x' o 'X'
-        
-        # Leer dígitos hexadecimales
-        tiene_digitos = False
-        while True:
-            c = _peek()
-            if ('0' <= c <= '9') or ('a' <= c <= 'f') or ('A' <= c <= 'F'):
-                lexema += _consume()
-                tiene_digitos = True
-            else:
-                break
-        
-        if not tiene_digitos:
-            return Token(TokenType.ERROR, lexema, line=_linea_actual, col_start=col_inicio, 
-                        col_end=_columna_actual-1, error_code=-1)
-        
-        valor = int(lexema, 16)
-        return Token(TokenType.INT_LIT, lexema, valor, _linea_actual, col_inicio, _columna_actual-1)
-    
-    # Verificar si es octal
-    if _peek() == '0' and (_peek_buffer[1] if len(_peek_buffer) > 1 else DemeElSiguienteCaracter()) != '.':
-        lexema += _consume()  # Consumir '0'
-        
-        # Leer dígitos octales
-        tiene_digitos = False
-        while True:
-            c = _peek()
-            if '0' <= c <= '7':
-                lexema += _consume()
-                tiene_digitos = True
-            else:
-                break
-        
-        valor = int(lexema, 8) if tiene_digitos else 0
-        return Token(TokenType.INT_LIT, lexema, valor, _linea_actual, col_inicio, _columna_actual-1)
-    
-    # Numero decimal (entero o flotante)
-    es_flotante = False
-    
-    # Leer la parte entera
+    tiene_punto = False
+    tiene_exponente = False
+
     while True:
         c = _peek()
+
         if _es_digito(c):
-            lexema += _consume()
+            lexema += tomecaracter()
+
+        elif c == '.':
+            if tiene_punto:
+                # Segundo punto decimal = error
+                lexema += tomecaracter()
+                return Token(TokenType.ERROR, lexema, line=_linea_actual,
+                             col_start=col_inicio, col_end=_columna_actual-1, error_code=-7)
+            tiene_punto = True
+            lexema += tomecaracter()
+
+        elif c in 'eE':
+            if tiene_exponente:
+                # Segundo exponente = error
+                lexema += tomecaracter()
+                return Token(TokenType.ERROR, lexema, line=_linea_actual,
+                             col_start=col_inicio, col_end=_columna_actual-1, error_code=-9)
+            tiene_exponente = True
+            lexema += tomecaracter()
+
+            # Puede venir signo + o -
+            if _peek() in '+-':
+                lexema += tomecaracter()
+
+            # Debe venir al menos un dígito
+            if not _es_digito(_peek()):
+                return Token(TokenType.ERROR, lexema, line=_linea_actual,
+                             col_start=col_inicio, col_end=_columna_actual-1, error_code=-10)
+
         else:
             break
-    
-    # Verificar si hay punto decimal
-    if _peek() == '.':
-        es_flotante = True
-        lexema += _consume()
-        
-        # Leer la parte decimal
-        while True:
-            c = _peek()
-            if _es_digito(c):
-                lexema += _consume()
-            else:
-                break
-    
-    col_fin = _columna_actual - 1
-    
-    if es_flotante:
-        valor = float(lexema)
-        return Token(TokenType.FLOAT_LIT, lexema, valor, _linea_actual, col_inicio, col_fin)
+
+    col_final = _columna_actual-1
+
+    # Ahora determina tipo
+    if tiene_punto or tiene_exponente:
+        try:
+            valor = float(lexema)
+            return Token(TokenType.FLOAT_LIT, lexema, value=valor, line=_linea_actual,
+                         col_start=col_inicio, col_end=col_final)
+        except ValueError:
+            return Token(TokenType.ERROR, lexema, line=_linea_actual,
+                         col_start=col_inicio, col_end=col_final, error_code=-11)
     else:
         valor = int(lexema)
-        return Token(TokenType.INT_LIT, lexema, valor, _linea_actual, col_inicio, col_fin)
+        return Token(TokenType.INT_LIT, lexema, value=valor, line=_linea_actual,
+                     col_start=col_inicio, col_end=col_final)
 
 def _procesar_caracter():
     """Procesa un literal de carácter."""
@@ -298,10 +285,10 @@ def _procesar_caracter():
     lexema = "'"
     
     # Consumir la comilla de apertura
-    _consume()
+    tomecaracter()
     
     # Leer el contenido del carácter
-    c = _consume()
+    c = tomecaracter()
     if c == 'EOF':
         return Token(TokenType.ERROR, lexema, line=_linea_actual, col_start=col_inicio, 
                     col_end=_columna_actual-1, error_code=-2)
@@ -310,14 +297,14 @@ def _procesar_caracter():
     
     # Si es un escape
     if c == '\\':
-        c = _consume()
+        c = tomecaracter()
         if c == 'EOF':
             return Token(TokenType.ERROR, lexema, line=_linea_actual, col_start=col_inicio, 
                         col_end=_columna_actual-1, error_code=-2)
         lexema += c
     
     # Consumir la comilla de cierre
-    c = _consume()
+    c = tomecaracter()
     if c != "'":
         return Token(TokenType.ERROR, lexema, line=_linea_actual, col_start=col_inicio, 
                     col_end=_columna_actual-1, error_code=-3)
@@ -330,37 +317,54 @@ def _procesar_caracter():
     return Token(TokenType.CHAR_LIT, lexema, valor, _linea_actual, col_inicio, _columna_actual-1)
 
 def _procesar_string():
-    """Procesa un literal de cadena."""
+    """Procesa literales de cadena."""
     col_inicio = _columna_actual
-    lexema = '"'
-    
-    # Consumir la comilla de apertura
-    _consume()
-    
-    # Leer el contenido de la cadena
+    lexema = ""
+    valor = ""
+
+    lexema += tomecaracter()  # Consume '"'
+
     while True:
-        c = _consume()
+        c = _peek()
+
         if c == 'EOF':
-            return Token(TokenType.ERROR, lexema, line=_linea_actual, col_start=col_inicio, 
-                        col_end=_columna_actual-1, error_code=-4)
-        
-        lexema += c
-        
-        if c == '"':
+            return Token(TokenType.ERROR, lexema, line=_linea_actual,
+                         col_start=col_inicio, col_end=_columna_actual-1, error_code=-4)
+
+        elif c == '\n':
+            return Token(TokenType.ERROR, lexema, line=_linea_actual,
+                         col_start=col_inicio, col_end=_columna_actual-1, error_code=-4)
+
+        elif c == '\"':
+            lexema += tomecaracter()
             break
-        
-        # Si es un escape
-        if c == '\\':
-            c = _consume()
-            if c == 'EOF':
-                return Token(TokenType.ERROR, lexema, line=_linea_actual, col_start=col_inicio, 
-                            col_end=_columna_actual-1, error_code=-4)
-            lexema += c
-    
-    # Procesar el valor (quitar las comillas)
-    valor = lexema[1:-1]
-    
-    return Token(TokenType.STRING_LIT, lexema, valor, _linea_actual, col_inicio, _columna_actual-1)
+
+        elif c == '\\':
+            lexema += tomecaracter()  # Consume '\'
+            esc = _peek()
+            if esc in ['n', 't', '\"', '\\']:
+                lexema += tomecaracter()
+                if esc == 'n':
+                    valor += '\n'
+                elif esc == 't':
+                    valor += '\t'
+                elif esc == '\"':
+                    valor += '\"'
+                elif esc == '\\':
+                    valor += '\\'
+            else:
+                # Escape inválido
+                lexema += tomecaracter()
+                return Token(TokenType.ERROR, lexema, line=_linea_actual,
+                             col_start=col_inicio, col_end=_columna_actual-1, error_code=-12)
+
+        else:
+            lexema += tomecaracter()
+            valor += c
+
+    col_final = _columna_actual-1
+    return Token(TokenType.STRING_LIT, lexema, value=valor, line=_linea_actual,
+                 col_start=col_inicio, col_end=col_final)
 
 def _procesar_comentario():
     """Procesa un comentario."""
@@ -368,27 +372,27 @@ def _procesar_comentario():
     lexema = ""
     
     # Consumir el primer '$'
-    lexema += _consume()
+    lexema += '$'
     
     # Ver el siguiente carácter
     c = _peek()
     
     if c == '$':  # Comentario de línea
-        lexema += _consume()
+        lexema += tomecaracter()
         
         # Leer hasta el final de la línea
         while True:
             c = _peek()
             if c == '\n' or c == 'EOF':
                 break
-            lexema += _consume()
+            lexema += tomecaracter()
             
     elif c == '*':  # Comentario de bloque
-        lexema += _consume()
+        lexema += tomecaracter()
         
         # Leer hasta encontrar "*$"
         while True:
-            c = _consume()
+            c = tomecaracter()
             if c == 'EOF':
                 return Token(TokenType.ERROR, lexema, line=_linea_actual, col_start=col_inicio, 
                             col_end=_columna_actual-1, error_code=-5)
@@ -396,7 +400,7 @@ def _procesar_comentario():
             lexema += c
             
             if c == '*' and _peek() == '$':
-                lexema += _consume()  # Consumir el '$'
+                lexema += tomecaracter()  # Consumir el '$'
                 break
     
     else:  # No es un comentario válido
@@ -406,188 +410,163 @@ def _procesar_comentario():
     return Token(TokenType.COMMENT, lexema, line=_linea_actual, col_start=col_inicio, col_end=_columna_actual-1)
 
 def DemeToken():
-    """Analiza y devuelve el siguiente token del archivo de entrada."""
+    """Devuelve el siguiente token, saltando sobre errores para recuperación."""
+    global _token_actual
     while True:
         c = _peek()
-        
+
         # Fin de archivo
         if c == 'EOF':
-            return Token(TokenType.EOF, "EOF", line=_linea_actual, col_start=_columna_actual, col_end=_columna_actual)
-        
-        # Ignorar espacios en blanco
+            return Token(TokenType.EOF, "EOF",
+                         line=_linea_actual,
+                         col_start=_columna_actual,
+                         col_end=_columna_actual)
+
+        # Espaciadores
         if _es_espaciador(c):
-            _consume()
+            tomecaracter()
             continue
-        
-        # Identificadores o palabras clave
+
+        # Letras: identificadores o palabras clave
         if _es_letra(c):
-            return _procesar_identificador_o_palabra_clave()
-        
-        # Números
-        if _es_digito(c):
-            return _procesar_numero()
-        
-        # Caracteres especiales
-        if c == '(':
-            _consume()
-            return Token(TokenType.LPAREN, "(", line=_linea_actual, col_start=_columna_actual-1, col_end=_columna_actual-1)
-        
-        if c == ')':
-            _consume()
-            return Token(TokenType.RPAREN, ")", line=_linea_actual, col_start=_columna_actual-1, col_end=_columna_actual-1)
-        
-        if c == '{':
-            _consume()
-            # Verificar si es inicio de conjunto o registro
-            if _peek() == ':':
-                return Token(TokenType.LBRACE, "{:", line=_linea_actual, col_start=_columna_actual-1, col_end=_columna_actual)
-            elif _peek() == '/':
-                return Token(TokenType.LBRACE, "{/", line=_linea_actual, col_start=_columna_actual-1, col_end=_columna_actual)
-            else:
-                return Token(TokenType.LBRACE, "{", line=_linea_actual, col_start=_columna_actual-1, col_end=_columna_actual-1)
-        
-        if c == '}':
-            _consume()
-            return Token(TokenType.RBRACE, "}", line=_linea_actual, col_start=_columna_actual-1, col_end=_columna_actual-1)
-        
-        if c == '[':
-            _consume()
-            return Token(TokenType.LBRACKET, "[", line=_linea_actual, col_start=_columna_actual-1, col_end=_columna_actual-1)
-        
-        if c == ']':
-            _consume()
-            return Token(TokenType.RBRACKET, "]", line=_linea_actual, col_start=_columna_actual-1, col_end=_columna_actual-1)
-        
-        if c == ';':
-            _consume()
-            return Token(TokenType.SEMICOLON, ";", line=_linea_actual, col_start=_columna_actual-1, col_end=_columna_actual-1)
-        
-        if c == ':':
-            _consume()
-            if _peek() == '+':
-                _consume()
-                return Token(TokenType.FLOAT_OP, ":+", line=_linea_actual, col_start=_columna_actual-2, col_end=_columna_actual-1)
-            elif _peek() == '-':
-                _consume()
-                return Token(TokenType.FLOAT_OP, ":-", line=_linea_actual, col_start=_columna_actual-2, col_end=_columna_actual-1)
-            elif _peek() == '*':
-                _consume()
-                return Token(TokenType.FLOAT_OP, ":*", line=_linea_actual, col_start=_columna_actual-2, col_end=_columna_actual-1)
-            elif _peek() == '/':
-                if len(_peek_buffer) > 1 and _peek_buffer[1] == '/':
-                    _consume()  # Consumir '/'
-                    _consume()  # Consumir '/'
-                    return Token(TokenType.FLOAT_OP, "://", line=_linea_actual, col_start=_columna_actual-3, col_end=_columna_actual-1)
-            elif _peek() == '%':
-                _consume()
-                return Token(TokenType.FLOAT_OP, ":%", line=_linea_actual, col_start=_columna_actual-2, col_end=_columna_actual-1)
-            elif _peek() == ':':
-                _consume()
-                return Token(TokenType.COLON, "::", line=_linea_actual, col_start=_columna_actual-2, col_end=_columna_actual-1)
-            elif _peek() == '}':
-                _consume()
-                return Token(TokenType.COLON, ":}", line=_linea_actual, col_start=_columna_actual-2, col_end=_columna_actual-1)
-            else:
-                return Token(TokenType.COLON, ":", line=_linea_actual, col_start=_columna_actual-1, col_end=_columna_actual-1)
-        
-        if c == '.':
-            _consume()
-            return Token(TokenType.DOT, ".", line=_linea_actual, col_start=_columna_actual-1, col_end=_columna_actual-1)
-        
-        if c == ',':
-            _consume()
-            return Token(TokenType.COMMA, ",", line=_linea_actual, col_start=_columna_actual-1, col_end=_columna_actual-1)
-        
-        if c == '@':
-            _consume()
-            return Token(TokenType.AT, "@", line=_linea_actual, col_start=_columna_actual-1, col_end=_columna_actual-1)
-        
-        if c == '=':
-            _consume()
-            return Token(TokenType.ASSIGN, "=", line=_linea_actual, col_start=_columna_actual-1, col_end=_columna_actual-1)
-        
-        if c == '+':
-            _consume()
-            if _peek() == '=':
-                _consume()
-                return Token(TokenType.ASSIGN, "+=", line=_linea_actual, col_start=_columna_actual-2, col_end=_columna_actual-1)
-            else:
-                return Token(TokenType.PLUS, "+", line=_linea_actual, col_start=_columna_actual-1, col_end=_columna_actual-1)
-        
-        if c == '-':
-            _consume()
-            if _peek() == '=':
-                _consume()
-                return Token(TokenType.ASSIGN, "-=", line=_linea_actual, col_start=_columna_actual-2, col_end=_columna_actual-1)
-            else:
-                return Token(TokenType.MINUS, "-", line=_linea_actual, col_start=_columna_actual-1, col_end=_columna_actual-1)
-        
-        if c == '*':
-            _consume()
-            if _peek() == '=':
-                _consume()
-                return Token(TokenType.ASSIGN, "*=", line=_linea_actual, col_start=_columna_actual-2, col_end=_columna_actual-1)
-            else:
-                return Token(TokenType.MULTIPLY, "*", line=_linea_actual, col_start=_columna_actual-1, col_end=_columna_actual-1)
-        
-        if c == '/':
-            _consume()
-            if _peek() == '/':
-                _consume()
+            _token_actual = _procesar_identificador_o_palabra_clave()
+
+        # Dígitos: números (enteros o flotantes)
+        elif _es_digito(c):
+            _token_actual = _procesar_numero()
+
+        # Operadores, símbolos y literales
+        elif c in "(){}[];,.:@=+-*/%<>$\"'":
+            ch = tomecaracter()
+
+            # Comparadores y asignaciones
+            if ch == '=':
                 if _peek() == '=':
-                    _consume()
-                    return Token(TokenType.ASSIGN, "//=", line=_linea_actual, col_start=_columna_actual-3, col_end=_columna_actual-1)
+                    tomecaracter()
+                    _token_actual = Token(TokenType.EQ, '==', line=_linea_actual,
+                                           col_start=_columna_actual-2,
+                                           col_end=_columna_actual)
                 else:
-                    return Token(TokenType.DIVIDE, "//", line=_linea_actual, col_start=_columna_actual-2, col_end=_columna_actual-1)
-            elif _peek() == '}':
-                _consume()
-                return Token(TokenType.RBRACE, "/}", line=_linea_actual, col_start=_columna_actual-2, col_end=_columna_actual-1)
+                    _token_actual = Token(TokenType.ASSIGN, '=', line=_linea_actual,
+                                           col_start=_columna_actual-1,
+                                           col_end=_columna_actual-1)
+            elif ch == '!':
+                if _peek() == '=':
+                    tomecaracter()
+                    _token_actual = Token(TokenType.NE, '!=', line=_linea_actual,
+                                           col_start=_columna_actual-2,
+                                           col_end=_columna_actual)
+                else:
+                    _token_actual = Token(TokenType.ERROR, '!', line=_linea_actual,
+                                           col_start=_columna_actual-1,
+                                           col_end=_columna_actual-1,
+                                           error_code=-8)
+            elif ch == '<':
+                if _peek() == '=':
+                    tomecaracter()
+                    _token_actual = Token(TokenType.LE, '<=', line=_linea_actual,
+                                           col_start=_columna_actual-2,
+                                           col_end=_columna_actual)
+                else:
+                    _token_actual = Token(TokenType.LT, '<', line=_linea_actual,
+                                           col_start=_columna_actual-1,
+                                           col_end=_columna_actual-1)
+            elif ch == '>':
+                if _peek() == '=':
+                    tomecaracter()
+                    _token_actual = Token(TokenType.GE, '>=', line=_linea_actual,
+                                           col_start=_columna_actual-2,
+                                           col_end=_columna_actual)
+                else:
+                    _token_actual = Token(TokenType.GT, '>', line=_linea_actual,
+                                           col_start=_columna_actual-1,
+                                           col_end=_columna_actual-1)
+
+            # División entera (solo //)
+            elif ch == '/':
+                if _peek() == '/':
+                    tomecaracter()
+                    _token_actual = Token(TokenType.DIVIDE, '//', line=_linea_actual,
+                                           col_start=_columna_actual-2,
+                                           col_end=_columna_actual)
+                else:
+                    _token_actual = Token(TokenType.ERROR, '/', line=_linea_actual,
+                                           col_start=_columna_actual-1,
+                                           col_end=_columna_actual-1,
+                                           error_code=-8)
+
+            # Float-ops con prefijo ':'
+            elif ch == ':':
+                if _peek() in ['+', '-', '*', '%']:
+                    op = ch + tomecaracter()
+                    _token_actual = Token(TokenType.FLOAT_OP, op, line=_linea_actual,
+                                           col_start=_columna_actual-2,
+                                           col_end=_columna_actual)
+                elif _peek() == '/':
+                    tomecaracter()
+                    if _peek() == '/':
+                        tomecaracter()
+                        _token_actual = Token(TokenType.FLOAT_OP, '://', line=_linea_actual,
+                                               col_start=_columna_actual-3,
+                                               col_end=_columna_actual)
+                    else:
+                        _token_actual = Token(TokenType.COLON, ':', line=_linea_actual,
+                                               col_start=_columna_actual-1,
+                                               col_end=_columna_actual-1)
+                else:
+                    _token_actual = Token(TokenType.COLON, ':', line=_linea_actual,
+                                           col_start=_columna_actual-1,
+                                           col_end=_columna_actual-1)
+
+            # Comentarios
+            elif ch == '$':
+                _token_actual = _procesar_comentario()
+
+            # Strings y caracteres
+            elif ch == '"':
+                _token_actual = _procesar_string()
+            elif ch == "'":
+                _token_actual = _procesar_caracter()
+
+            # Resto de símbolos sencillos
             else:
-                return Token(TokenType.ERROR, "/", line=_linea_actual, col_start=_columna_actual-1, 
-                            col_end=_columna_actual-1, error_code=-7)
-        
-        if c == '%':
-            _consume()
-            if _peek() == '=':
-                _consume()
-                return Token(TokenType.ASSIGN, "%=", line=_linea_actual, col_start=_columna_actual-2, col_end=_columna_actual-1)
-            else:
-                return Token(TokenType.MODULO, "%", line=_linea_actual, col_start=_columna_actual-1, col_end=_columna_actual-1)
-        
-        if c == '<':
-            _consume()
-            if _peek() == '=':
-                _consume()
-                return Token(TokenType.LE, "<=", line=_linea_actual, col_start=_columna_actual-2, col_end=_columna_actual-1)
-            else:
-                return Token(TokenType.LT, "<", line=_linea_actual, col_start=_columna_actual-1, col_end=_columna_actual-1)
-        
-        if c == '>':
-            _consume()
-            if _peek() == '=':
-                _consume()
-                return Token(TokenType.GE, ">=", line=_linea_actual, col_start=_columna_actual-2, col_end=_columna_actual-1)
-            elif _peek() == '>':
-                _consume()
-                return Token(TokenType.COLON, ">>", line=_linea_actual, col_start=_columna_actual-2, col_end=_columna_actual-1)
-            else:
-                return Token(TokenType.GT, ">", line=_linea_actual, col_start=_columna_actual-1, col_end=_columna_actual-1)
-        
-        # Literales de carácter y cadena
-        if c == "'":
-            return _procesar_caracter()
-        
-        if c == '"':
-            return _procesar_string()
-        
-        # Comentarios
-        if c == '$':
-            return _procesar_comentario()
-        
-        # Carácter desconocido (error)
-        _consume()
-        return Token(TokenType.ERROR, c, line=_linea_actual, col_start=_columna_actual-1, 
-                    col_end=_columna_actual-1, error_code=-8)
+                token_map = {
+                    '(': TokenType.LPAREN, ')': TokenType.RPAREN,
+                    '{': TokenType.LBRACE, '}': TokenType.RBRACE,
+                    '[': TokenType.LBRACKET, ']': TokenType.RBRACKET,
+                    ';': TokenType.SEMICOLON, ',': TokenType.COMMA,
+                    '.': TokenType.DOT, '+': TokenType.PLUS,
+                    '-': TokenType.MINUS, '*': TokenType.MULTIPLY,
+                    '%': TokenType.MODULO, '@': TokenType.AT
+                }
+                tok_type = token_map.get(ch)
+                if tok_type:
+                    _token_actual = Token(tok_type, ch, line=_linea_actual,
+                                           col_start=_columna_actual-1,
+                                           col_end=_columna_actual-1)
+                else:
+                    _token_actual = Token(TokenType.ERROR, ch, line=_linea_actual,
+                                           col_start=_columna_actual-1,
+                                           col_end=_columna_actual-1,
+                                           error_code=-8)
+        else:
+            tomecaracter()
+            _token_actual = Token(TokenType.ERROR, c, line=_linea_actual,
+                                   col_start=_columna_actual-1,
+                                   col_end=_columna_actual-1,
+                                   error_code=-8)
+
+        # Recuperación de errores: re-sincronizar
+        if _token_actual.type == TokenType.ERROR:
+            while True:
+                nx = _peek()
+                if nx == 'EOF' or _es_espaciador(nx) or _es_letra(nx) or _es_digito(nx):
+                    break
+                tomecaracter()
+            return _token_actual
+
+        return _token_actual
+
 
 def TomeToken():
     """Acepta el token actual."""
