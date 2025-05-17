@@ -39,7 +39,7 @@ StringEsc = "Línea1\nLínea2\tTab";
 StringUnterminated = "Esto no cierra
 
 $$ 5) Operadores y comparadores
-+ - * / % = < > <= >= == !=
++ - * // % = < > <= >= == !=
 
 $$ 6) Símbolos
 ( ) { } [ ] ; : . , @
