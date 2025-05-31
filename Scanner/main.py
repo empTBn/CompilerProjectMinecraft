@@ -1,30 +1,42 @@
 from scanner import InicializarScanner, DemeToken, TomeToken, FinalizarScanner, TokenType
+from parser import parse_tokens
 
-def main():
-    # Nombre del archivo para probar el scanner
-    nombre_archivo = "prueba.ne"
-
-    print(f"Analizando archivo: {nombre_archivo}")
-    print("-" * 50)
-
-    # Inicializar el scanner con el archivo de prueba
+def lex_file(nombre_archivo: str):
+    """
+    Recorre todo el archivo y devuelve la lista completa de tokens.
+    """
+    tokens = []
     InicializarScanner(nombre_archivo)
-
-    # Procesar tokens hasta encontrar EOF
     try:
         while True:
-            token = DemeToken()
-            print(token)
-            
-            if token.type == TokenType.EOF:
+            tok = DemeToken()
+            tokens.append(tok)
+            if tok.type == TokenType.EOF:
                 break
-            
             TomeToken()
-    except Exception as e:
-        print(f"Error durante el análisis léxico: {e}")
     finally:
-        # Liberar los recursos utilizados por el scanner
         FinalizarScanner()
+    return tokens
+
+def main():
+    archivo = "prueba.ne"
+
+    # Fase léxica: se obtiene el listado completo de tokens
+    tokens = lex_file(archivo)
+    print(f"Tokens obtenidos ({len(tokens)}):")
+    for t in tokens:
+        print("  ", t)
+    print()
+
+    # Fase sintáctica: alimentamos el parser con la lista de tokens
+    print(f"Iniciando parser sobre los {len(tokens)} tokens...\n")
+    errores = parse_tokens(tokens)
+    if errores:
+        print("\nErrores sintácticos detectados:")
+        for e in errores:
+            print("  -", e)
+    else:
+        print("Parseo completado sin errores.")
 
 if __name__ == "__main__":
     main()
