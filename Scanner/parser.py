@@ -1,7 +1,19 @@
+# parser.py
+
 from scanner import TokenType
+from rutinas_semanticas import (
+    declare_variable,
+    check_variable_exists,
+    check_assignment_types,
+    push_literal_type,
+    push_variable_type,
+    mark_variable_initialized,
+    dump_symbol_table
+)
 
-# Mapeo de terminales a índices 
-
+# ------------------------------------------------------------
+# 1) Mapeo de terminales a índices 
+# ------------------------------------------------------------
 TERMINALES = {
     TokenType.ANVIL:        0,
     TokenType.BEDROCK:      1,
@@ -27,45 +39,46 @@ TERMINALES = {
     TokenType.WORLDSAVE:    21,
     TokenType.BOOL_ON:      22,
     TokenType.BOOL_OFF:     23,
-    TokenType.IS:           24,    # no usado en la gramática provisional
-    TokenType.ISNOT:        25,    # no usado en la gramática provisional
+    TokenType.IS:           24,
+    TokenType.ISNOT:        25,
     TokenType.ID:           26,
     TokenType.INT_LIT:      27,
-    TokenType.FLOAT_LIT:    28,    # no usado aquí
-    TokenType.CHAR_LIT:     29,    # no usado aquí
+    TokenType.FLOAT_LIT:    28,
+    TokenType.CHAR_LIT:     29,
     TokenType.STRING_LIT:   30,
     TokenType.LPAREN:       31,
     TokenType.RPAREN:       32,
     TokenType.LBRACE:       33,
     TokenType.RBRACE:       34,
-    TokenType.LBRACKET:     35,    # no usado aquí
-    TokenType.RBRACKET:     36,    # no usado aquí
+    TokenType.LBRACKET:     35,
+    TokenType.RBRACKET:     36,
     TokenType.SEMICOLON:    37,
     TokenType.COLON:        38,
-    TokenType.DOT:          39,    # no usado aquí
+    TokenType.DOT:          39,
     TokenType.COMMA:        40,
-    TokenType.AT:           41,    # no usado aquí
-    TokenType.PLUS:         42,    # no usado aquí
-    TokenType.MINUS:        43,    # no usado aquí
-    TokenType.MULTIPLY:     44,    # no usado aquí
-    TokenType.DIVIDE:       45,    # no usado aquí
-    TokenType.FLOAT_OP:     46,    # no usado aquí
-    TokenType.MODULO:       47,    # no usado aquí
-    TokenType.LT:           48,    # no usado aquí
-    TokenType.GT:           49,    # no usado aquí
-    TokenType.LE:           50,    # no usado aquí
-    TokenType.GE:           51,    # no usado aquí
-    TokenType.EQ:           52,    # no usado aquí
-    TokenType.NE:           53,    # no usado aquí
-    TokenType.COMMENT:      54,    # no se usa en el parser, se descarta
+    TokenType.AT:           41,
+    TokenType.PLUS:         42,
+    TokenType.MINUS:        43,
+    TokenType.MULTIPLY:     44,
+    TokenType.DIVIDE:       45,   # '//'
+    TokenType.FLOAT_OP:     46,   # ':+', ':-', ':*', '://', ':%'
+    TokenType.MODULO:       47,
+    TokenType.LT:           48,
+    TokenType.GT:           49,
+    TokenType.LE:           50,
+    TokenType.GE:           51,
+    TokenType.EQ:           52,
+    TokenType.NE:           53,
+    TokenType.COMMENT:      54,
     TokenType.EOF:          55,
-    TokenType.ERROR:        56,    # No se trata como token válido de parser
+    TokenType.ERROR:        56,   # (no se usa en el parser)
 }
 
 NUM_T = len(TERMINALES)
 
-# No terminales 
-
+# ------------------------------------------------------------
+# 2) No terminales 
+# ------------------------------------------------------------
 NO_TERMINALES = {
     'S':           0,
     'WorldDecl':   1,
@@ -82,19 +95,19 @@ NO_TERMINALES = {
 
 NUM_NT = len(NO_TERMINALES)
 
+# Valor de “epsilon” (cuando la producción no genera nada)
 EPSILON = -2
 
-# Cuando empujamos un terminal en la pila, en realidad lo codificamos
-# como (OFFSET_T + índice_en_TERMINALES). Para distinguir terminales vs. no terminales:
 OFFSET_T = NUM_NT
 
-# Tabla de Lados Derechos (TLD)
-
+# ------------------------------------------------------------
+# 3) Tabla de Lados Derechos
+# ------------------------------------------------------------
 TLD = [
-    # Regla 0: S ::= WorldDecl
+    # 0: S ::= WorldDecl
     [ NO_TERMINALES['WorldDecl'] ],
 
-    # Regla 1: WorldDecl ::= WORLDNAME ID COLON LBRACE StmtList RBRACE
+    # 1: WorldDecl ::= WORLDNAME ID COLON LBRACE StmtList RBRACE
     [
       OFFSET_T + TERMINALES[TokenType.WORLDNAME],
       OFFSET_T + TERMINALES[TokenType.ID],
@@ -104,63 +117,49 @@ TLD = [
       OFFSET_T + TERMINALES[TokenType.RBRACE]
     ],
 
-    # Regla 2: StmtList ::= Stmt StmtList
+    # 2: StmtList ::= Stmt StmtList
     [ NO_TERMINALES['Stmt'], NO_TERMINALES['StmtList'] ],
 
-    # Regla 3: StmtList ::= ε
+    # 3: StmtList ::= ε
     [ EPSILON ],
 
-    # Regla 4: Stmt ::= EntityCall SEMICOLON
-    [
-      NO_TERMINALES['EntityCall'],
-      OFFSET_T + TERMINALES[TokenType.SEMICOLON]
-    ],
+    # 4: Stmt ::= EntityCall SEMICOLON
+    [ NO_TERMINALES['EntityCall'], OFFSET_T + TERMINALES[TokenType.SEMICOLON] ],
 
-    # Regla 5: Stmt ::= Assignment SEMICOLON
-    [
-      NO_TERMINALES['Assignment'],
-      OFFSET_T + TERMINALES[TokenType.SEMICOLON]
-    ],
+    # 5: Stmt ::= Assignment SEMICOLON
+    [ NO_TERMINALES['Assignment'], OFFSET_T + TERMINALES[TokenType.SEMICOLON] ],
 
-    # Regla 6: Stmt ::= Toggle SEMICOLON
-    [
-      NO_TERMINALES['Toggle'],
-      OFFSET_T + TERMINALES[TokenType.SEMICOLON]
-    ],
+    # 6: Stmt ::= Toggle SEMICOLON
+    [ NO_TERMINALES['Toggle'], OFFSET_T + TERMINALES[TokenType.SEMICOLON] ],
 
-    # Regla 7: Stmt ::= RepeatStmt
+    # 7: Stmt ::= RepeatStmt
     [ NO_TERMINALES['RepeatStmt'] ],
 
-    # Regla 8: EntityCall ::= (ANVIL | BEDROCK | ... | TORCH | WORLDSAVE) LPAREN ArgList RPAREN
-    # Para simplificar, manejamos todas estas 18 “palabras reservadas” como posibles
-    # primeros símbolos. En la tabla TP se pondrá la misma producción 8 para cada uno.
+    # 8: EntityCall ::= KEYWORD LPAREN ArgList RPAREN
     [
-      # (usaremos el TokenType valor para decidir cuál poner)
-      # El parser dirá “si TA.type es ANVIL, o BEDROCK, ..., aplica la Regla 8”
-      # Luego empujaremos estos tres símbolos:
-      OFFSET_T + TERMINALES[TokenType.ANVIL],        # <- se sobrescribirá en TP para cada keyword
+      OFFSET_T + TERMINALES[TokenType.ANVIL],        # (reemplazado dinámicamente por TP)
       OFFSET_T + TERMINALES[TokenType.LPAREN],
       NO_TERMINALES['ArgList'],
       OFFSET_T + TERMINALES[TokenType.RPAREN]
     ],
 
-    # Regla 9: Assignment ::= ID ASSIGN Expr
+    # 9: Assignment ::= ID ASSIGN Expr
     [
       OFFSET_T + TERMINALES[TokenType.ID],
       OFFSET_T + TERMINALES[TokenType.ASSIGN],
       NO_TERMINALES['Expr']
     ],
 
-    # Regla 10: Expr ::= ID
+    # 10: Expr ::= ID
     [ OFFSET_T + TERMINALES[TokenType.ID] ],
 
-    # Regla 11: Expr ::= INT_LIT
+    # 11: Expr ::= INT_LIT
     [ OFFSET_T + TERMINALES[TokenType.INT_LIT] ],
 
-    # Regla 12: Expr ::= STRING_LIT
+    # 12: Expr ::= STRING_LIT
     [ OFFSET_T + TERMINALES[TokenType.STRING_LIT] ],
 
-    # Regla 13: Toggle ::= BOOL_ON LPAREN ID RPAREN
+    # 13: Toggle ::= BOOL_ON LPAREN ID RPAREN
     [
       OFFSET_T + TERMINALES[TokenType.BOOL_ON],
       OFFSET_T + TERMINALES[TokenType.LPAREN],
@@ -168,7 +167,7 @@ TLD = [
       OFFSET_T + TERMINALES[TokenType.RPAREN]
     ],
 
-    # Regla 14: Toggle ::= BOOL_OFF LPAREN ID RPAREN
+    # 14: Toggle ::= BOOL_OFF LPAREN ID RPAREN
     [
       OFFSET_T + TERMINALES[TokenType.BOOL_OFF],
       OFFSET_T + TERMINALES[TokenType.LPAREN],
@@ -176,7 +175,7 @@ TLD = [
       OFFSET_T + TERMINALES[TokenType.RPAREN]
     ],
 
-    # Regla 15: RepeatStmt ::= REPEATER ID ASSIGN Expr LBRACE StmtList RBRACE
+    # 15: RepeatStmt ::= REPEATER ID ASSIGN Expr LBRACE StmtList RBRACE
     [
       OFFSET_T + TERMINALES[TokenType.REPEATER],
       OFFSET_T + TERMINALES[TokenType.ID],
@@ -187,37 +186,36 @@ TLD = [
       OFFSET_T + TERMINALES[TokenType.RBRACE]
     ],
 
-    # Regla 16: ArgList ::= Expr MoreArgs
+    # 16: ArgList ::= Expr MoreArgs
     [ NO_TERMINALES['Expr'], NO_TERMINALES['MoreArgs'] ],
 
-    # Regla 17: ArgList ::= ε
+    # 17: ArgList ::= ε
     [ EPSILON ],
 
-    # Regla 18: MoreArgs ::= COMMA Expr MoreArgs
+    # 18: MoreArgs ::= COMMA Expr MoreArgs
     [
       OFFSET_T + TERMINALES[TokenType.COMMA],
       NO_TERMINALES['Expr'],
       NO_TERMINALES['MoreArgs']
     ],
 
-    # Regla 19: MoreArgs ::= ε
+    # 19: MoreArgs ::= ε
     [ EPSILON ],
 ]
 
-# Tabla de Parsing (TP): inicializamos todo en -1, luego llenamos
-
+# ------------------------------------------------------------
+# 4) Construcción de la Tabla de Parsing (TP)
+# ------------------------------------------------------------
 TP = [[-1] * NUM_T for _ in range(NUM_NT)]
 
-# Regla 0: S ::= WorldDecl 
-for tokype in [TokenType.WORLDNAME]:
-    TP[ NO_TERMINALES['S'] ][ TERMINALES[tokype] ] = 0
+# Regla 0: S ::= WorldDecl  (si TA es WORLDNAME)
+TP[ NO_TERMINALES['S']           ][ TERMINALES[TokenType.WORLDNAME] ] = 0
 
 # Regla 1: WorldDecl ::= WORLDNAME ID COLON LBRACE StmtList RBRACE
-for tokype in [TokenType.WORLDNAME]:
-    TP[ NO_TERMINALES['WorldDecl'] ][ TERMINALES[tokype] ] = 1
+TP[ NO_TERMINALES['WorldDecl']   ][ TERMINALES[TokenType.WORLDNAME] ] = 1
 
-# Regla 2: StmtList ::= Stmt StmtList   (cuando el primer token de “Stmt” sea alguno de estos)
-for first in (
+# Regla 2: StmtList ::= Stmt StmtList     (si TA en {Entity-keywords, ID, BOOL_ON, BOOL_OFF, REPEATER})
+for first_token in (
     TokenType.ANVIL, TokenType.BEDROCK, TokenType.BOOK, TokenType.CRAFTINGTABLE,
     TokenType.CHEST, TokenType.ENTITY, TokenType.GHAST, TokenType.INVENTORY,
     TokenType.OBSIDIAN, TokenType.POLLOCRUDO, TokenType.POLLOASADO, TokenType.RESOURCEPACK,
@@ -227,81 +225,79 @@ for first in (
     TokenType.ID,
     TokenType.BOOL_ON, TokenType.BOOL_OFF
 ):
-    TP[ NO_TERMINALES['StmtList'] ][ TERMINALES[first] ] = 2
+    TP[ NO_TERMINALES['StmtList'] ][ TERMINALES[first_token] ] = 2
 
-# Regla 3: StmtList ::= ε    (si el próximo token cierra bloque o es RBRACE o EOF)
+# Regla 3: StmtList ::= ε   (si TA es RBRACE o EOF)
 for t in (TokenType.RBRACE, TokenType.EOF):
     TP[ NO_TERMINALES['StmtList'] ][ TERMINALES[t] ] = 3
 
-# Regla 4: Stmt ::= EntityCall SEMICOLON
-#        válido si el TA es alguna de las keywords de entidad:
-for first in (
-    TokenType.ANVIL, TokenType.BEDROCK, TokenType.BOOK, TokenType.CRAFTINGTABLE,
-    TokenType.CHEST, TokenType.ENTITY, TokenType.GHAST, TokenType.INVENTORY,
-    TokenType.OBSIDIAN, TokenType.POLLOCRUDO, TokenType.POLLOASADO, TokenType.RESOURCEPACK,
-    TokenType.RECIPE, TokenType.RUNE, TokenType.REPEATER, TokenType.SPAWNPOINT,
-    TokenType.STACK, TokenType.SPIDER, TokenType.SHELF, TokenType.TORCH, TokenType.WORLDSAVE
-):
-    TP[ NO_TERMINALES['Stmt'] ][ TERMINALES[first] ] = 4
-
-# Regla 5: Stmt ::= Assignment SEMICOLON    (cuando TA es ID)
-TP[ NO_TERMINALES['Stmt'] ][ TERMINALES[TokenType.ID] ] = 5
-
-# Regla 6: Stmt ::= Toggle SEMICOLON        (si TA es BOOL_ON o BOOL_OFF)
-TP[ NO_TERMINALES['Stmt'] ][ TERMINALES[TokenType.BOOL_ON] ]  = 6
-TP[ NO_TERMINALES['Stmt'] ][ TERMINALES[TokenType.BOOL_OFF] ] = 6
-
-# Regla 7: Stmt ::= RepeatStmt             (si TA es REPEATER)
-TP[ NO_TERMINALES['Stmt'] ][ TERMINALES[TokenType.REPEATER] ] = 7
-
-# Regla 8: EntityCall ::= KEYWORD LPAREN ArgList RPAREN
-#   (Los “KEYWORD” de entidad se repiten 18 veces, pero apuntan a la misma producción 8)
+# Regla 4: Stmt ::= EntityCall SEMICOLON    (si TA es alguna de las keywords de entidad)
 for kw in (
     TokenType.ANVIL, TokenType.BEDROCK, TokenType.BOOK, TokenType.CRAFTINGTABLE,
     TokenType.CHEST, TokenType.ENTITY, TokenType.GHAST, TokenType.INVENTORY,
     TokenType.OBSIDIAN, TokenType.POLLOCRUDO, TokenType.POLLOASADO, TokenType.RESOURCEPACK,
-    TokenType.RECIPE, TokenType.RUNE, TokenType.REPEATER, TokenType.SPAWNPOINT,
-    TokenType.STACK, TokenType.SPIDER, TokenType.SHELF, TokenType.TORCH, TokenType.WORLDSAVE
+    TokenType.RECIPE, TokenType.RUNE, TokenType.SPAWNPOINT, TokenType.STACK,
+    TokenType.SPIDER, TokenType.SHELF, TokenType.TORCH, TokenType.WORLDSAVE
+):
+    TP[ NO_TERMINALES['Stmt'] ][ TERMINALES[kw] ] = 4
+
+# Regla 5: Stmt ::= Assignment SEMICOLON      (si TA es ID)
+TP[ NO_TERMINALES['Stmt'] ][ TERMINALES[TokenType.ID] ] = 5
+
+# Regla 6: Stmt ::= Toggle SEMICOLON          (si TA es BOOL_ON o BOOL_OFF)
+TP[ NO_TERMINALES['Stmt'] ][ TERMINALES[TokenType.BOOL_ON] ]  = 6
+TP[ NO_TERMINALES['Stmt'] ][ TERMINALES[TokenType.BOOL_OFF] ] = 6
+
+# Regla 7: Stmt ::= RepeatStmt               (si TA es REPEATER)
+TP[ NO_TERMINALES['Stmt'] ][ TERMINALES[TokenType.REPEATER] ] = 7
+
+# Regla 8: EntityCall ::= KEYWORD LPAREN ArgList RPAREN 
+for kw in (
+    TokenType.ANVIL, TokenType.BEDROCK, TokenType.BOOK, TokenType.CRAFTINGTABLE,
+    TokenType.CHEST, TokenType.ENTITY, TokenType.GHAST, TokenType.INVENTORY,
+    TokenType.OBSIDIAN, TokenType.POLLOCRUDO, TokenType.POLLOASADO, TokenType.RESOURCEPACK,
+    TokenType.RECIPE, TokenType.RUNE, TokenType.SPAWNPOINT, TokenType.STACK,
+    TokenType.SPIDER, TokenType.SHELF, TokenType.TORCH, TokenType.WORLDSAVE
 ):
     TP[ NO_TERMINALES['EntityCall'] ][ TERMINALES[kw] ] = 8
 
-# Regla 9: Assignment ::= ID ASSIGN Expr   (si TA es ID)
+# Regla 9: Assignment ::= ID ASSIGN Expr
 TP[ NO_TERMINALES['Assignment'] ][ TERMINALES[TokenType.ID] ] = 9
 
-# Regla 10: Expr ::= ID                     (si TA es ID)
+# Regla 10: Expr ::= ID
 TP[ NO_TERMINALES['Expr'] ][ TERMINALES[TokenType.ID] ] = 10
 
-# Regla 11: Expr ::= INT_LIT                (si TA es INT_LIT)
+# Regla 11: Expr ::= INT_LIT
 TP[ NO_TERMINALES['Expr'] ][ TERMINALES[TokenType.INT_LIT] ] = 11
 
-# Regla 12: Expr ::= STRING_LIT             (si TA es STRING_LIT)
+# Regla 12: Expr ::= STRING_LIT
 TP[ NO_TERMINALES['Expr'] ][ TERMINALES[TokenType.STRING_LIT] ] = 12
 
-# Regla 13: Toggle ::= BOOL_ON LPAREN ID RPAREN  (si TA es BOOL_ON)
+# Regla 13: Toggle ::= BOOL_ON LPAREN ID RPAREN
 TP[ NO_TERMINALES['Toggle'] ][ TERMINALES[TokenType.BOOL_ON] ]  = 13
 
-# Regla 14: Toggle ::= BOOL_OFF LPAREN ID RPAREN (si TA es BOOL_OFF)
+# Regla 14: Toggle ::= BOOL_OFF LPAREN ID RPAREN
 TP[ NO_TERMINALES['Toggle'] ][ TERMINALES[TokenType.BOOL_OFF] ] = 14
 
 # Regla 15: RepeatStmt ::= REPEATER ID ASSIGN Expr LBRACE StmtList RBRACE
-#   (si TA es REPEATER)
 TP[ NO_TERMINALES['RepeatStmt'] ][ TERMINALES[TokenType.REPEATER] ] = 15
 
-# Regla 16: ArgList ::= Expr MoreArgs   (si TA en Expr: ID, INT_LIT, STRING_LIT)
-for first in (TokenType.ID, TokenType.INT_LIT, TokenType.STRING_LIT):
-    TP[ NO_TERMINALES['ArgList'] ][ TERMINALES[first] ] = 16
+# Regla 16: ArgList ::= Expr MoreArgs    (si TA en {ID, INT_LIT, STRING_LIT})
+for f in (TokenType.ID, TokenType.INT_LIT, TokenType.STRING_LIT):
+    TP[ NO_TERMINALES['ArgList'] ][ TERMINALES[f] ] = 16
 
-# Regla 17: ArgList ::= ε   (si TA es RPAREN)
+# Regla 17: ArgList ::= ε    (si TA es RPAREN)
 TP[ NO_TERMINALES['ArgList'] ][ TERMINALES[TokenType.RPAREN] ] = 17
 
-# Regla 18: MoreArgs ::= COMMA Expr MoreArgs (si TA es COMMA)
+# Regla 18: MoreArgs ::= COMMA Expr MoreArgs  (si TA es COMMA)
 TP[ NO_TERMINALES['MoreArgs'] ][ TERMINALES[TokenType.COMMA] ] = 18
 
-# Regla 19: MoreArgs ::= ε   (si TA es RPAREN)
+# Regla 19: MoreArgs ::= ε    (si TA es RPAREN)
 TP[ NO_TERMINALES['MoreArgs'] ][ TERMINALES[TokenType.RPAREN] ] = 19
 
-# Clase TokenStream para recorrer la lista de tokens
-
+# ------------------------------------------------------------
+# 5) Para recorrer la lista de tokens
+# ------------------------------------------------------------
 class TokenStream:
     def __init__(self, tokens):
         self.tokens = tokens
@@ -319,50 +315,39 @@ class TokenStream:
             return t
         return self.tokens[-1]
 
-# Recuperación de errores
-
+# ------------------------------------------------------------
+# 6) Rutina de recuperación de errores 
+# ------------------------------------------------------------
 def recover_on_error(ts: TokenStream):
-    """
-    Avanza en el TokenStream hasta encontrar:
-      - un ';' (TokenType.SEMICOLON)
-      - un '}' (TokenType.RBRACE)
-      - o EOF.
-    Luego regresa para reintentar la derivación.
-    """
-    print("  [Re-sincronizando: buscando ';' o '}' o EOF...]")
+    print("  [Re-sincronizando: buscando ';' o '}' o EOF…]")
     while True:
         tok = ts.next()
         if tok.type in (TokenType.SEMICOLON, TokenType.RBRACE, TokenType.EOF):
             print(f"  [Re-sincronizado en token {tok.type.name}]")
             return
 
-# Driver principal de parsing
-
+# ------------------------------------------------------------
+# 7) Driver principal de parsing con llamadas semánticas
+# ------------------------------------------------------------
 def parse_tokens(tokens):
-    """
-    Recibe la lista completa de tokens (etapa léxica ya terminada),
-    y realiza el análisis sintáctico LL(1) con recuperación de errores.
-    Devuelve una lista de mensajes de error (vacía si no hubo).
-    """
     ts = TokenStream(tokens)
     errores = []
 
-    # Inicializo TA (token actual) sin consumirlo aún
-    TA = ts.peek()
-
-    # Creo la pila de parsing y meto el símbolo inicial 'S'
+    TA = ts.peek()                    # Token actual (sin consumir aún)
     pila = Stack()
-    pila.push(NO_TERMINALES['S'])
+    pila.push(NO_TERMINALES['S'])     # Empezamos con el símbolo inicial S
 
-    # Mientras la pila no esté vacía:
+    # Variables auxiliares para chequeos semánticos en Assignments
+    left_assign_token = None  # guardará el ID de la LHS cuando estemos reduciendo “Assignment”
+
     while not pila.is_empty():
         EAP = pila.pop()
 
-        # --- CASO A: EAP es un terminal:
+        # CASO A: EAP es un terminal
         if EAP >= OFFSET_T:
             terminal_index = EAP - OFFSET_T
 
-            # Buscamos qué TokenType corresponde a ese índice
+            # ¿Qué TokenType corresponde a ese índice?
             expected_tok = None
             for tokype, idx in TERMINALES.items():
                 if idx == terminal_index:
@@ -370,28 +355,46 @@ def parse_tokens(tokens):
                     break
 
             if expected_tok is None:
-                errores.append(f"[INTERNAL ERROR] Símbolo terminal desconocido: código={EAP}")
+                errores.append(f"[INTERNAL] Terminal desconocido: código={EAP}")
                 return errores
 
-            # Comparamos TA.type con expected_tok
+            # Hacemos match: si coincide, consumimos TA, si no → error + resincronizar
             if TA.type == expected_tok:
-                # Hizo match. Consumimos el token y seguimos
+                # Antes de consumir, inyectamos ciertas acciones semánticas:
+                #  1) Si estamos reduciendo “Assignment ::= ID ASSIGN Expr”:
+                if left_assign_token is None and expected_tok == TokenType.ID:
+                    # Podría ser el ID de la LHS de Assignment: lo guardamos
+                    left_assign_token = TA
+
+                #  2) Si es un literal dentro de Expr
+                if expected_tok == TokenType.INT_LIT or expected_tok == TokenType.STRING_LIT:
+                    push_literal_type(TA)
+
+                #  3) Si es un ID dentro de Expr o Toggle o RepeatStmt
+                if expected_tok == TokenType.ID:
+                    # Chequeamos existencia y empujamos su tipo
+                    check_variable_exists(TA.lexeme, TA.line)
+                    push_variable_type(TA)
+
+                #  4) Si acabamos de consumir “ASSIGN” en Assignment:
+                if expected_tok == TokenType.ASSIGN and left_assign_token is not None:
+                    # Llamamos a declare_variable(...) en el LHS (si no existe, lo creamos)
+                    declare_variable(left_assign_token.lexeme, left_assign_token.line)
+
                 TA = ts.next()
             else:
                 errores.append(
-                    f"Error sintáctico: esperaba '{expected_tok.name}' pero vino '{TA.type.name}' "
-                    f"(lexema='{TA.lexeme}') en línea {TA.line}"
+                    f"Error sintáctico: esperaba '{expected_tok.name}' "
+                    f"pero vino '{TA.type.name}' (lexema='{TA.lexeme}') en línea {TA.line}"
                 )
-                # Recuperación de error
                 recover_on_error(ts)
                 TA = ts.peek()
             continue
 
-        # --- CASO B: EAP es un no terminal (0..NUM_NT-1)
+        # CASO B: EAP es un no terminal
         fila = EAP
         col = TERMINALES.get(TA.type, None)
         if col is None:
-            # TA.type no está en TERMINALES → token inválido aquí
             errores.append(
                 f"Error sintáctico: token inesperado '{TA.type.name}' (lexema='{TA.lexeme}') en línea {TA.line}"
             )
@@ -401,42 +404,67 @@ def parse_tokens(tokens):
 
         regla = TP[fila][col]
         if regla < 0:
-            # No existe producción en la celda PREDICT(fila, col)
             nt_name = None
             for name, idx in NO_TERMINALES.items():
                 if idx == fila:
                     nt_name = name
                     break
             errores.append(
-                f"Error sintáctico en no terminal '{nt_name}': entrada '{TA.type.name}' "
-                f"(lexema='{TA.lexeme}') no está en PREDICT"
+                f"Error sintáctico en no terminal '{nt_name}': "
+                f"entrada '{TA.type.name}' (lexema='{TA.lexeme}') no está en PREDICT"
             )
             recover_on_error(ts)
             TA = ts.peek()
             continue
 
-        # Hay una regla válida: la metemos en la pila
         derecho = TLD[regla]
         if not (len(derecho) == 1 and derecho[0] == EPSILON):
-            # Si no es epsilon, empujamos cada símbolo de derecha a izquierda
             for simbolo in reversed(derecho):
                 pila.push(simbolo)
-        # **Nota**: no consumimos TA aquí; solo avanzamos cuando hacemos match de un terminal.
 
-    # Al salir, la pila ya está vacía. Debemos verificar que TA sea EOF.
+        # ------- AÑADIMOS LLAMADAS SEMÁNTICAS según la regla -------
+
+        #  - Si la regla es  9: “Assignment ::= ID ASSIGN Expr”
+        #    después de reducir todo Expr, debemos invocar check_assignment_types.
+        if regla == 9:
+            # Cuando la parte Expr ya se haya consumido por completo, TA habrá sido actualizado.
+            # Podemos tomar el último literal o ID que se apiló en la pila de tipos para el RHS.
+            # Para simplificar, asumimos que “right_token” está en TA-previo a la llamada:
+            right_token = TA
+            if left_assign_token is not None:
+                check_assignment_types(left_assign_token, right_token)
+            left_assign_token = None  # reseteamos
+
+        #  - Si la regla es 13 o 14 (Toggle), el ID que consumimos dentro de Toggle ya fue chequeado
+        #    vía check_variable_exists en el bloque “match terminal”.
+
+        #  - Si la regla es 15 (RepeatStmt ::= REPEATER ID ASSIGN Expr LBRACE StmtList RBRACE):
+        #    Para el ID en la posición 1, checamos existencia y tipo (int).
+        if regla == 15:
+            # El token ID fue chequeado en el “match terminal”; 
+            # en ese momento, push_variable_type() lo colocó en la pila de tipos.
+            # Aquí podríamos pop() y verificar que sea “int”:
+            pass  # ya se maneja parcialmente en “match terminal”
+
+
+    # Al salir del while, la pila quedó vacía. Debemos verificar que TA sea EOF.
     if TA.type != TokenType.EOF:
         errores.append(
             f"Error sintáctico: entrada no consumida al terminar el parser. "
             f"Token sobrante: '{TA.type.name}' (lexema='{TA.lexeme}') en línea {TA.line}"
         )
     else:
-        # Si no hubo ningún error → agregamos indicador de “sin errores”
         errores.append("SIN_ERRORES")
+
+    # Para propósitos de depuración, volcamos la tabla de símbolos
+    print("\n--- Contenido de la Tabla de Símbolos al final del parseo: ---")
+    dump_symbol_table()
 
     return errores
 
-# Implementación de la pila
-
+# ------------------------------------------------------------
+# 8) Implementación de la pila (Stack)
+# ------------------------------------------------------------
 class Stack:
     def __init__(self):
         self._data = []
