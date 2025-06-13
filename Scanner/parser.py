@@ -11,9 +11,7 @@ from rutinas_semanticas import (
     dump_symbol_table
 )
 
-# ------------------------------------------------------------
-# 1) Mapeo de terminales a índices 
-# ------------------------------------------------------------
+# Mapeo de terminales a índices 
 TERMINALES = {
     TokenType.ANVIL:        0,
     TokenType.BEDROCK:      1,
@@ -76,9 +74,7 @@ TERMINALES = {
 
 NUM_T = len(TERMINALES)
 
-# ------------------------------------------------------------
-# 2) No terminales 
-# ------------------------------------------------------------
+# No terminales 
 NO_TERMINALES = {
     'S':           0,
     'WorldDecl':   1,
@@ -100,9 +96,8 @@ EPSILON = -2
 
 OFFSET_T = NUM_NT
 
-# ------------------------------------------------------------
-# 3) Tabla de Lados Derechos
-# ------------------------------------------------------------
+# Tabla de Lados Derechos
+
 TLD = [
     # 0: S ::= WorldDecl
     [ NO_TERMINALES['WorldDecl'] ],
@@ -203,9 +198,8 @@ TLD = [
     [ EPSILON ],
 ]
 
-# ------------------------------------------------------------
-# 4) Construcción de la Tabla de Parsing (TP)
-# ------------------------------------------------------------
+# Construcción de la Tabla de Parsing (TP)
+
 TP = [[-1] * NUM_T for _ in range(NUM_NT)]
 
 # Regla 0: S ::= WorldDecl  (si TA es WORLDNAME)
@@ -295,9 +289,7 @@ TP[ NO_TERMINALES['MoreArgs'] ][ TERMINALES[TokenType.COMMA] ] = 18
 # Regla 19: MoreArgs ::= ε    (si TA es RPAREN)
 TP[ NO_TERMINALES['MoreArgs'] ][ TERMINALES[TokenType.RPAREN] ] = 19
 
-# ------------------------------------------------------------
-# 5) Para recorrer la lista de tokens
-# ------------------------------------------------------------
+# Para recorrer la lista de tokens
 class TokenStream:
     def __init__(self, tokens):
         self.tokens = tokens
@@ -315,9 +307,8 @@ class TokenStream:
             return t
         return self.tokens[-1]
 
-# ------------------------------------------------------------
-# 6) Rutina de recuperación de errores 
-# ------------------------------------------------------------
+# Rutina de recuperación de errores 
+
 def recover_on_error(ts: TokenStream):
     print("  [Re-sincronizando: buscando ';' o '}' o EOF…]")
     while True:
@@ -326,9 +317,8 @@ def recover_on_error(ts: TokenStream):
             print(f"  [Re-sincronizado en token {tok.type.name}]")
             return
 
-# ------------------------------------------------------------
-# 7) Driver principal de parsing con llamadas semánticas
-# ------------------------------------------------------------
+# Driver principal de parsing con llamadas semánticas
+
 def parse_tokens(tokens):
     ts = TokenStream(tokens)
     errores = []
@@ -462,9 +452,7 @@ def parse_tokens(tokens):
 
     return errores
 
-# ------------------------------------------------------------
-# 8) Implementación de la pila (Stack)
-# ------------------------------------------------------------
+# Implementación de la pila
 class Stack:
     def __init__(self):
         self._data = []
