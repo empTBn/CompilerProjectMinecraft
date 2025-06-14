@@ -1,5 +1,3 @@
-# type_stack.py
-
 class TypeStack:
     """
     Pila auxiliar de tipos. En el análisis semántico se usa para:
